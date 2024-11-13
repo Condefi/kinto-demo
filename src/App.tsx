@@ -1,21 +1,29 @@
-import { useEffect, useState } from 'react';
-import { createKintoSDK, KintoAccountInfo } from 'kinto-web-sdk';
+import { useEffect, useState } from "react";
+import { createKintoSDK, KintoAccountInfo } from "kinto-web-sdk";
 import {
-  encodeFunctionData, Address, getContract,
-  defineChain, createPublicClient, http
-} from 'viem';
-import styled from 'styled-components';
-import AppHeader from 'components/shared/AppHeader';
-import AppFooter from 'components/shared/AppFooter';
+  encodeFunctionData,
+  Address,
+  getContract,
+  defineChain,
+  createPublicClient,
+  http,
+} from "viem";
+import styled from "styled-components";
+import AppHeader from "components/shared/AppHeader";
+import AppFooter from "components/shared/AppFooter";
 import {
-  BaseScreen, BaseHeader, LearnLink, KintoAddress,
-  GlobalLoader, PrimaryButton
-} from 'components/shared';
-import { BREAKPOINTS } from 'config';
-import { ReactComponent as CreditImage } from './credit.svg';
-import numeral from 'numeral';
-import contractsJSON from '../public/abis/7887.json';
-import './App.css';
+  BaseScreen,
+  BaseHeader,
+  LearnLink,
+  KintoAddress,
+  GlobalLoader,
+  PrimaryButton,
+} from "components/shared";
+import { BREAKPOINTS } from "config";
+import { ReactComponent as CreditImage } from "./credit.svg";
+import numeral from "numeral";
+import contractsJSON from "../public/abis/7887.json";
+import "./App.css";
 
 interface KYCViewerInfo {
   isIndividual: boolean;
@@ -26,41 +34,90 @@ interface KYCViewerInfo {
   getWalletOwners: Address[];
 }
 
-export const counterAbi = [{ "type": "constructor", "inputs": [], "stateMutability": "nonpayable" }, { "type": "function", "name": "count", "inputs": [], "outputs": [{ "name": "", "type": "uint256", "internalType": "uint256" }], "stateMutability": "view" }, { "type": "function", "name": "increment", "inputs": [], "outputs": [], "stateMutability": "nonpayable" }];
+export const counterAbi = [
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "to",
+        type: "address",
+      },
+      {
+        internalType: "uint256",
+        name: "value",
+        type: "uint256",
+      },
+    ],
+    name: "transfer",
+    outputs: [
+      {
+        internalType: "bool",
+        name: "",
+        type: "bool",
+      },
+    ],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
+        internalType: "address",
+        name: "account",
+        type: "address",
+      },
+    ],
+    name: "balanceOf",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+];
 
 const kinto = defineChain({
   id: 7887,
-  name: 'Kinto',
-  network: 'kinto',
+  name: "Kinto",
+  network: "kinto",
   nativeCurrency: {
     decimals: 18,
-    name: 'ETH',
-    symbol: 'ETH',
+    name: "ETH",
+    symbol: "ETH",
   },
   rpcUrls: {
     default: {
-      http: ['https://rpc.kinto-rpc.com/'],
-      webSocket: ['wss://rpc.kinto.xyz/ws'],
+      http: ["https://rpc.kinto-rpc.com/"],
+      webSocket: ["wss://rpc.kinto.xyz/ws"],
     },
   },
   blockExplorers: {
-    default: { name: 'Explorer', url: 'https://kintoscan.io' },
+    default: { name: "Explorer", url: "https://kintoscan.io" },
   },
 });
 
 const KintoConnect = () => {
-  const [accountInfo, setAccountInfo] = useState<KintoAccountInfo | undefined>(undefined);
-  const [kycViewerInfo, setKYCViewerInfo] = useState<any | undefined>(undefined);
+  const [accountInfo, setAccountInfo] = useState<KintoAccountInfo | undefined>(
+    undefined
+  );
+  const [kycViewerInfo, setKYCViewerInfo] = useState<any | undefined>(
+    undefined
+  );
   const [counter, setCounter] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
-  const kintoSDK = createKintoSDK('0x14A1EC9b43c270a61cDD89B6CbdD985935D897fE');
-  const counterAddress = "0x14A1EC9b43c270a61cDD89B6CbdD985935D897fE" as Address;
+  const kintoSDK = createKintoSDK("0xF4c03194BB7231ce0151134764EedF93F6d896B8");
+  const counterAddress =
+    "0xF4c03194BB7231ce0151134764EedF93F6d896B8" as Address;
 
   async function kintoLogin() {
     try {
       await kintoSDK.createNewWallet();
     } catch (error) {
-      console.error('Failed to login/signup:', error);
+      console.error("Failed to login/signup:", error);
     }
   }
 
@@ -72,24 +129,37 @@ const KintoConnect = () => {
     const counter = getContract({
       address: counterAddress as Address,
       abi: counterAbi,
-      client: { public: client }
+      client: { public: client },
     });
-    const count = await counter.read.count([]) as BigInt;
-    setCounter(parseInt(count.toString()));
+    const count = (await counter.read.balanceOf([
+      "0x76423D8436439eDd48EE1Ac67E3Dba3223dE593a",
+    ])) as BigInt;
+    
+    // Divide by 10^18 to account for the 18 decimals
+    const formattedCount = Number(count) / 1e18;
+    
+    // Set the formatted count (to display two decimal places, if needed)
+    setCounter(parseInt(formattedCount.toFixed(2)));
+    
   }
 
   async function increaseCounter() {
     const data = encodeFunctionData({
       abi: counterAbi,
-      functionName: 'increment',
-      args: []
+      functionName: "transfer",
+      args: [
+        "0x76423D8436439eDd48EE1Ac67E3Dba3223dE593a",
+        "1000000000000000000",
+      ],
     });
     setLoading(true);
     try {
-      const response = await kintoSDK.sendTransaction([{ to: counterAddress, data, value: BigInt(0) }]);
+      const response = await kintoSDK.sendTransaction([
+        { to: counterAddress, data, value: BigInt(0) },
+      ]);
       await fetchCounter();
     } catch (error) {
-      console.error('Failed to login/signup:', error);
+      console.error("Failed to login/signup:", error);
     } finally {
       setLoading(false);
     }
@@ -105,17 +175,24 @@ const KintoConnect = () => {
     const kycViewer = getContract({
       address: contractsJSON.contracts.KYCViewer.address as Address,
       abi: contractsJSON.contracts.KYCViewer.abi,
-      client: { public: client }
+      client: { public: client },
     });
 
     try {
-      const [isIndividual, isCorporate, isKYC, isSanctionsSafe, getCountry, getWalletOwners] = await Promise.all([
+      const [
+        isIndividual,
+        isCorporate,
+        isKYC,
+        isSanctionsSafe,
+        getCountry,
+        getWalletOwners,
+      ] = await Promise.all([
         kycViewer.read.isIndividual([accountInfo.walletAddress]),
         kycViewer.read.isCompany([accountInfo.walletAddress]),
         kycViewer.read.isKYC([accountInfo.walletAddress]),
         kycViewer.read.isSanctionsSafe([accountInfo.walletAddress]),
         kycViewer.read.getCountry([accountInfo.walletAddress]),
-        kycViewer.read.getWalletOwners([accountInfo.walletAddress])
+        kycViewer.read.getWalletOwners([accountInfo.walletAddress]),
       ]);
 
       setKYCViewerInfo({
@@ -124,22 +201,22 @@ const KintoConnect = () => {
         isKYC,
         isSanctionsSafe,
         getCountry,
-        getWalletOwners
+        getWalletOwners,
       } as KYCViewerInfo);
     } catch (error) {
-      console.error('Failed to fetch KYC viewer info:', error);
+      console.error("Failed to fetch KYC viewer info:", error);
     }
 
-    console.log('KYCViewerInfo:', kycViewerInfo);
+    console.log("KYCViewerInfo:", kycViewerInfo);
   }
 
   async function fetchAccountInfo() {
     try {
       setAccountInfo(await kintoSDK.connect());
     } catch (error) {
-      console.error('Failed to fetch account info:', error);
+      console.error("Failed to fetch account info:", error);
     }
-  };
+  }
 
   useEffect(() => {
     fetchAccountInfo();
@@ -162,8 +239,7 @@ const KintoConnect = () => {
             {accountInfo && (
               <BgWrapper>
                 <CounterWrapper>
-                  <BaseHeader
-                    title="Kinto Wallet SDK Sample App" />
+                  <BaseHeader title="Kinto Wallet SDK Sample App" />
                   {!accountInfo.walletAddress && (
                     <PrimaryButton onClick={kintoLogin}>
                       Login/Signup
@@ -180,46 +256,68 @@ const KintoConnect = () => {
                     <WalletRow key="app">
                       <WalletRowName>App</WalletRowName>
                       <WalletRowValue>
-                        <StyledMainAddress chainId={7887} address={counterAddress} showExplorer showClipboard />
+                        <StyledMainAddress
+                          chainId={7887}
+                          address={counterAddress}
+                          showExplorer
+                          showClipboard
+                        />
                       </WalletRowValue>
                     </WalletRow>
                     <WalletRow key="address">
                       <WalletRowName>Wallet</WalletRowName>
                       <WalletRowValue>
-                        <StyledMainAddress chainId={7887} address={accountInfo.walletAddress as Address} showExplorer showClipboard />
+                        <StyledMainAddress
+                          chainId={7887}
+                          address={accountInfo.walletAddress as Address}
+                          showExplorer
+                          showClipboard
+                        />
                       </WalletRowValue>
                     </WalletRow>
                     <WalletRow key="Application Key">
                       <WalletRowName>App Key</WalletRowName>
                       <WalletRowValue>
-                        <StyledMainAddress chainId={7887} address={accountInfo.appKey as Address} showExplorer showClipboard />
+                        <StyledMainAddress
+                          chainId={7887}
+                          address={accountInfo.appKey as Address}
+                          showExplorer
+                          showClipboard
+                        />
                       </WalletRowValue>
                     </WalletRow>
                     {kycViewerInfo && (
                       <>
-
                         <WalletRow key="isIndividual">
                           <WalletRowName>Is Individual</WalletRowName>
                           <WalletRowValue>
-                            <ETHValue>{kycViewerInfo.isIndividual ? 'Yes' : 'No'}</ETHValue>
+                            <ETHValue>
+                              {kycViewerInfo.isIndividual ? "Yes" : "No"}
+                            </ETHValue>
                           </WalletRowValue>
                         </WalletRow>
                         <WalletRow key="isCorporate">
                           <WalletRowName>Is Corporate</WalletRowName>
                           <WalletRowValue>
-                            <ETHValue>{kycViewerInfo.isCorporate ? 'Yes' : 'No'}</ETHValue>
+                            <ETHValue>
+                              {kycViewerInfo.isCorporate ? "Yes" : "No"}
+                            </ETHValue>
                           </WalletRowValue>
                         </WalletRow>
                         <WalletRow key="isKYC">
                           <WalletRowName>Is KYC</WalletRowName>
                           <WalletRowValue>
-                            <ETHValue>{kycViewerInfo.isKYC ? 'Yes' : 'No'}</ETHValue>
+                            <ETHValue>
+                              {kycViewerInfo.isKYC ? "Yes" : "No"}
+                            </ETHValue>
                           </WalletRowValue>
                         </WalletRow>
                         <WalletRow key="isSanctionsSafe">
                           <WalletRowName>Is Sanctions Safe</WalletRowName>
                           <WalletRowValue>
-                            <ETHValue>{kycViewerInfo.isSanctionsSafe ? 'Yes' : 'No'}</ETHValue>
+                            <ETHValue>
+                              {kycViewerInfo.isSanctionsSafe ? "Yes" : "No"}
+                            </ETHValue>
                           </WalletRowValue>
                         </WalletRow>
                         <WalletRow key="country">
@@ -238,27 +336,29 @@ const KintoConnect = () => {
                     </WalletRow>
                   </WalletRows>
                   <WalletNotice>
-                    <span>Attention!</span> Only send funds to your wallet address in the Kinto Network
+                    <span>Attention!</span> Only send funds to your wallet
+                    address in the Kinto Network
                   </WalletNotice>
                   {accountInfo && (
                     <PrimaryButton onClick={increaseCounter}>
                       Increase Counter
                     </PrimaryButton>
                   )}
-                  <LearnLink link={"https://docs.kinto.xyz"} text="Learn more about the Kinto Wallet SDK" />
+                  <LearnLink
+                    link={"https://docs.kinto.xyz"}
+                    text="Learn more about the Kinto Wallet SDK"
+                  />
                 </CounterWrapper>
               </BgWrapper>
             )}
-            {!accountInfo && (
-              <GlobalLoader />
-            )}
+            {!accountInfo && <GlobalLoader />}
           </BaseScreen>
           <AppFooter />
         </ContentWrapper>
       </AppWrapper>
     </WholeWrapper>
   );
-}
+};
 
 const WholeWrapper = styled.div`
   flex-flow: column nowrap;
@@ -432,7 +532,6 @@ const ETHValue = styled.div`
   @media only screen and (max-width: ${BREAKPOINTS.mobile}) {
     font-size: 24px;
   }
-
 `;
 
 function App() {
