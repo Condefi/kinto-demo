@@ -14,68 +14,63 @@ import AppFooter from "components/shared/AppFooter";
 import {
   BaseScreen,
   BaseHeader,
-  LearnLink,
-  KintoAddress,
   GlobalLoader,
   PrimaryButton,
 } from "components/shared";
-import { BREAKPOINTS } from "config";
-import { ReactComponent as CreditImage } from "./credit.svg";
-import numeral from "numeral";
-import contractsJSON from "../public/abis/7887.json";
 import "./App.css";
 
-interface KYCViewerInfo {
-  isIndividual: boolean;
-  isCorporate: boolean;
-  isKYC: boolean;
-  isSanctionsSafe: boolean;
-  getCountry: string;
-  getWalletOwners: Address[];
-}
+const USDC_ADDRESS = "0xcBcc3AF21CAE5Ba7a284bDe8a857b04190CcD29D";
+const SRC_ADDRESS = "0x28B9786677F2261487494581a73EE724eD2db1f2";
+const LDT_ADDRESS = "0x5AA66fEf2fFd6c59cB6630a186423a480a064906";
 
-export const counterAbi = [
+const MARKETPLACE_ADDRESS = "0x7FE6BA5ee1122DA581CC38a805796472613C214B";
+
+const marketplaceAbi = [
   {
     inputs: [
-      {
-        internalType: "address",
-        name: "to",
-        type: "address",
-      },
-      {
-        internalType: "uint256",
-        name: "value",
-        type: "uint256",
-      },
+      { internalType: "address", name: "token", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
     ],
-    name: "transfer",
-    outputs: [
-      {
-        internalType: "bool",
-        name: "",
-        type: "bool",
-      },
-    ],
+    name: "buy",
+    outputs: [],
     stateMutability: "nonpayable",
     type: "function",
   },
   {
     inputs: [
-      {
-        internalType: "address",
-        name: "account",
-        type: "address",
-      },
+      { internalType: "address", name: "token", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
     ],
-    name: "balanceOf",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "",
-        type: "uint256",
-      },
-    ],
+    name: "sell",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [{ internalType: "address", name: "token", type: "address" }],
+    name: "getPrice",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
     stateMutability: "view",
+    type: "function",
+  },
+];
+
+const erc20Abi = [
+  {
+    inputs: [{ internalType: "address", name: "account", type: "address" }],
+    name: "balanceOf",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      { internalType: "address", name: "spender", type: "address" },
+      { internalType: "uint256", name: "amount", type: "uint256" },
+    ],
+    name: "approve",
+    outputs: [{ internalType: "bool", name: "", type: "bool" }],
+    stateMutability: "nonpayable",
     type: "function",
   },
 ];
@@ -84,11 +79,7 @@ const kinto = defineChain({
   id: 7887,
   name: "Kinto",
   network: "kinto",
-  nativeCurrency: {
-    decimals: 18,
-    name: "ETH",
-    symbol: "ETH",
-  },
+  nativeCurrency: { decimals: 18, name: "ETH", symbol: "ETH" },
   rpcUrls: {
     default: {
       http: ["https://rpc.kinto-rpc.com/"],
@@ -100,258 +91,350 @@ const kinto = defineChain({
   },
 });
 
-const KintoConnect = () => {
-  const [accountInfo, setAccountInfo] = useState<KintoAccountInfo | undefined>(
-    undefined
-  );
-  const [kycViewerInfo, setKYCViewerInfo] = useState<any | undefined>(
-    undefined
-  );
-  const [counter, setCounter] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(false);
-  const kintoSDK = createKintoSDK("0xF4c03194BB7231ce0151134764EedF93F6d896B8");
-  const counterAddress =
-    "0xF4c03194BB7231ce0151134764EedF93F6d896B8" as Address;
+const TokenMarketplace = () => {
+  const [accountInfo, setAccountInfo] = useState<
+    KintoAccountInfo | undefined
+  >();
+  const [isSelling, setIsSelling] = useState(false);
+  const [selectedToken, setSelectedToken] = useState(SRC_ADDRESS);
+  const [amount, setAmount] = useState("");
+  const [expectedOutput, setExpectedOutput] = useState("0");
+  const [loading, setLoading] = useState(false);
+  const [balances, setBalances] = useState<{ [key: string]: string }>({});
+  const [needsApproval, setNeedsApproval] = useState(false);
 
-  async function kintoLogin() {
-    try {
-      await kintoSDK.createNewWallet();
-    } catch (error) {
-      console.error("Failed to login/signup:", error);
+  const kintoSDK = createKintoSDK(MARKETPLACE_ADDRESS);
+  const client = createPublicClient({
+    chain: kinto,
+    transport: http(),
+  });
+
+  async function fetchBalances() {
+    if (!accountInfo?.walletAddress) return;
+
+    const tokens = [USDC_ADDRESS, SRC_ADDRESS, LDT_ADDRESS];
+    const newBalances: { [key: string]: string } = {};
+
+    for (const token of tokens) {
+      const contract = getContract({
+        address: token as Address,
+        abi: erc20Abi,
+        client: { public: client },
+      });
+
+      const balance = await contract.read.balanceOf([
+        accountInfo.walletAddress,
+      ]);
+      newBalances[token] = (Number(balance) / 1e18).toFixed(4);
     }
+
+    setBalances(newBalances);
   }
 
-  async function fetchCounter() {
-    const client = createPublicClient({
-      chain: kinto,
-      transport: http(),
-    });
-    const counter = getContract({
-      address: counterAddress as Address,
-      abi: counterAbi,
-      client: { public: client },
-    });
-    const count = (await counter.read.balanceOf([
-      "0x76423D8436439eDd48EE1Ac67E3Dba3223dE593a",
-    ])) as BigInt;
-    
-    // Divide by 10^18 to account for the 18 decimals
-    const formattedCount = Number(count) / 1e18;
-    
-    // Set the formatted count (to display two decimal places, if needed)
-    setCounter(parseInt(formattedCount.toFixed(2)));
-    
-  }
+// ... previous code remains same until checkAllowance function
 
-  async function increaseCounter() {
-    const data = encodeFunctionData({
-      abi: counterAbi,
-      functionName: "transfer",
-      args: [
-        "0x76423D8436439eDd48EE1Ac67E3Dba3223dE593a",
-        "1000000000000000000",
-      ],
+async function checkAllowance(token: string, amount: string) {
+  if (!accountInfo?.walletAddress) return false;
+  
+  const tokenContract = getContract({
+    address: token as Address,
+    abi: [
+      ...erc20Abi,
+      {
+        inputs: [
+          { internalType: "address", name: "owner", type: "address" },
+          { internalType: "address", name: "spender", type: "address" }
+        ],
+        name: "allowance",
+        outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+        stateMutability: "view",
+        type: "function",
+      }
+    ],
+    client: { public: client },
+  });
+
+  try {
+    const allowance = await tokenContract.read.allowance([
+      accountInfo.walletAddress,
+      MARKETPLACE_ADDRESS
+    ]) as bigint;
+    
+    const amountWei = BigInt(parseFloat(amount) * 1e18);
+    console.log('Allowance check:', {
+      token,
+      allowance: allowance.toString(),
+      required: amountWei.toString()
     });
+    
+    // Simple comparison - if allowance >= required amount, we're good
+    return allowance >= amountWei;
+  } catch (error) {
+    console.error('Error checking allowance:', error);
+    return false;
+  }
+}
+
+async function approve() {
+  if (!amount || !accountInfo?.walletAddress) return;
+  
+  setLoading(true);
+  try {
+    const tokenToApprove = isSelling ? selectedToken : USDC_ADDRESS;
+    // Approve a very large amount so we don't need to approve again
+    const maxApproval = BigInt("115792089237316195423570985008687907853269984665640564039457584007913129639935"); // type(uint256).max
+    
+    await kintoSDK.sendTransaction([{
+      to: tokenToApprove as Address,
+      data: encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "approve",
+        args: [MARKETPLACE_ADDRESS, maxApproval],
+      }),
+      value: BigInt(0),
+    }]);
+
+    // After approval, check allowance again
+    const hasAllowance = await checkAllowance(tokenToApprove, amount);
+    setNeedsApproval(!hasAllowance);
+  } catch (error) {
+    console.error("Approval failed:", error);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// Less frequent allowance checks - only when amount or token changes
+useEffect(() => {
+  let timeoutId: NodeJS.Timeout;
+  
+  async function checkApprovalNeeded() {
+    if (!amount || parseFloat(amount) <= 0) {
+      setNeedsApproval(false);
+      return;
+    }
+    
+    const tokenToCheck = isSelling ? selectedToken : USDC_ADDRESS;
+    // Add delay to prevent too frequent checks
+    timeoutId = setTimeout(async () => {
+      const hasAllowance = await checkAllowance(tokenToCheck, amount);
+      setNeedsApproval(!hasAllowance);
+    }, 500);
+  }
+  
+  checkApprovalNeeded();
+  return () => clearTimeout(timeoutId);
+}, [amount, selectedToken, isSelling]);
+
+  async function handleSwap() {
+    if (!amount || !selectedToken || !accountInfo?.walletAddress) return;
+
     setLoading(true);
     try {
-      const response = await kintoSDK.sendTransaction([
-        { to: counterAddress, data, value: BigInt(0) },
-      ]);
-      await fetchCounter();
+      const amountWei = BigInt(parseFloat(amount) * 1e18);
+
+      if (isSelling) {
+        await kintoSDK.sendTransaction([
+          {
+            to: MARKETPLACE_ADDRESS,
+            data: encodeFunctionData({
+              abi: marketplaceAbi,
+              functionName: "sell",
+              args: [selectedToken, amountWei],
+            }),
+            value: BigInt(0),
+          },
+        ]);
+      } else {
+        await kintoSDK.sendTransaction([
+          {
+            to: MARKETPLACE_ADDRESS,
+            data: encodeFunctionData({
+              abi: marketplaceAbi,
+              functionName: "buy",
+              args: [selectedToken, amountWei],
+            }),
+            value: BigInt(0),
+          },
+        ]);
+      }
+
+      await fetchBalances();
+      setAmount("");
+      setExpectedOutput("0");
+      setNeedsApproval(false);
     } catch (error) {
-      console.error("Failed to login/signup:", error);
+      console.error("Swap failed:", error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function fetchKYCViewerInfo() {
-    if (!accountInfo?.walletAddress) return;
+  async function updateExpectedOutput() {
+    if (!amount || !selectedToken) {
+      setExpectedOutput("0");
+      return;
+    }
 
-    const client = createPublicClient({
-      chain: kinto,
-      transport: http(),
-    });
-    const kycViewer = getContract({
-      address: contractsJSON.contracts.KYCViewer.address as Address,
-      abi: contractsJSON.contracts.KYCViewer.abi,
+    const contract = getContract({
+      address: MARKETPLACE_ADDRESS as Address,
+      abi: marketplaceAbi,
       client: { public: client },
     });
 
-    try {
-      const [
-        isIndividual,
-        isCorporate,
-        isKYC,
-        isSanctionsSafe,
-        getCountry,
-        getWalletOwners,
-      ] = await Promise.all([
-        kycViewer.read.isIndividual([accountInfo.walletAddress]),
-        kycViewer.read.isCompany([accountInfo.walletAddress]),
-        kycViewer.read.isKYC([accountInfo.walletAddress]),
-        kycViewer.read.isSanctionsSafe([accountInfo.walletAddress]),
-        kycViewer.read.getCountry([accountInfo.walletAddress]),
-        kycViewer.read.getWalletOwners([accountInfo.walletAddress]),
-      ]);
-
-      setKYCViewerInfo({
-        isIndividual,
-        isCorporate,
-        isKYC,
-        isSanctionsSafe,
-        getCountry,
-        getWalletOwners,
-      } as KYCViewerInfo);
-    } catch (error) {
-      console.error("Failed to fetch KYC viewer info:", error);
-    }
-
-    console.log("KYCViewerInfo:", kycViewerInfo);
-  }
-
-  async function fetchAccountInfo() {
-    try {
-      setAccountInfo(await kintoSDK.connect());
-    } catch (error) {
-      console.error("Failed to fetch account info:", error);
-    }
+    const price = await contract.read.getPrice([selectedToken]);
+    const amountIn = parseFloat(amount);
+    const output = (
+      isSelling
+        ? (amountIn * Number(price)) / 1e18
+        : amountIn / (Number(price) / 1e18)
+    ).toFixed(6);
+    setExpectedOutput(output);
   }
 
   useEffect(() => {
-    fetchAccountInfo();
-    fetchCounter();
-  });
+    updateExpectedOutput();
+  }, [amount, selectedToken, isSelling]);
+
+  useEffect(() => {
+    async function init() {
+      try {
+        const info = await kintoSDK.connect();
+        setAccountInfo(info);
+      } catch (error) {
+        console.error("Failed to connect:", error);
+      }
+    }
+    init();
+  }, [kintoSDK]);
 
   useEffect(() => {
     if (accountInfo?.walletAddress) {
-      fetchKYCViewerInfo();
+      fetchBalances();
     }
   }, [accountInfo]);
 
-  // todo: add info about the dev portal and link
+  // Check if approval is needed whenever amount/token/direction changes
+  useEffect(() => {
+    async function checkApprovalNeeded() {
+      if (!amount || parseFloat(amount) <= 0) {
+        setNeedsApproval(false);
+        return;
+      }
+
+      const tokenToCheck = isSelling ? selectedToken : USDC_ADDRESS;
+      const hasAllowance = await checkAllowance(tokenToCheck, amount);
+      setNeedsApproval(!hasAllowance);
+    }
+
+    checkApprovalNeeded();
+  }, [amount, selectedToken, isSelling, accountInfo]);
+
   return (
     <WholeWrapper>
       <AppWrapper>
         <ContentWrapper>
           <AppHeader />
           <BaseScreen>
-            {accountInfo && (
-              <BgWrapper>
-                <CounterWrapper>
-                  <BaseHeader title="Kinto Wallet SDK Sample App" />
-                  {!accountInfo.walletAddress && (
-                    <PrimaryButton onClick={kintoLogin}>
-                      Login/Signup
-                    </PrimaryButton>
-                  )}
-                  <WalletRows>
-                    <WalletRow key="chain">
-                      <WalletRowName>Chain</WalletRowName>
-                      <WalletRowValue>
-                        <StyledCreditImage />
-                        <KintoLabel>Kinto (ID: 7887)</KintoLabel>
-                      </WalletRowValue>
-                    </WalletRow>
-                    <WalletRow key="app">
-                      <WalletRowName>App</WalletRowName>
-                      <WalletRowValue>
-                        <StyledMainAddress
-                          chainId={7887}
-                          address={counterAddress}
-                          showExplorer
-                          showClipboard
-                        />
-                      </WalletRowValue>
-                    </WalletRow>
-                    <WalletRow key="address">
-                      <WalletRowName>Wallet</WalletRowName>
-                      <WalletRowValue>
-                        <StyledMainAddress
-                          chainId={7887}
-                          address={accountInfo.walletAddress as Address}
-                          showExplorer
-                          showClipboard
-                        />
-                      </WalletRowValue>
-                    </WalletRow>
-                    <WalletRow key="Application Key">
-                      <WalletRowName>App Key</WalletRowName>
-                      <WalletRowValue>
-                        <StyledMainAddress
-                          chainId={7887}
-                          address={accountInfo.appKey as Address}
-                          showExplorer
-                          showClipboard
-                        />
-                      </WalletRowValue>
-                    </WalletRow>
-                    {kycViewerInfo && (
-                      <>
-                        <WalletRow key="isIndividual">
-                          <WalletRowName>Is Individual</WalletRowName>
-                          <WalletRowValue>
-                            <ETHValue>
-                              {kycViewerInfo.isIndividual ? "Yes" : "No"}
-                            </ETHValue>
-                          </WalletRowValue>
-                        </WalletRow>
-                        <WalletRow key="isCorporate">
-                          <WalletRowName>Is Corporate</WalletRowName>
-                          <WalletRowValue>
-                            <ETHValue>
-                              {kycViewerInfo.isCorporate ? "Yes" : "No"}
-                            </ETHValue>
-                          </WalletRowValue>
-                        </WalletRow>
-                        <WalletRow key="isKYC">
-                          <WalletRowName>Is KYC</WalletRowName>
-                          <WalletRowValue>
-                            <ETHValue>
-                              {kycViewerInfo.isKYC ? "Yes" : "No"}
-                            </ETHValue>
-                          </WalletRowValue>
-                        </WalletRow>
-                        <WalletRow key="isSanctionsSafe">
-                          <WalletRowName>Is Sanctions Safe</WalletRowName>
-                          <WalletRowValue>
-                            <ETHValue>
-                              {kycViewerInfo.isSanctionsSafe ? "Yes" : "No"}
-                            </ETHValue>
-                          </WalletRowValue>
-                        </WalletRow>
-                        <WalletRow key="country">
-                          <WalletRowName>Country</WalletRowName>
-                          <WalletRowValue>
-                            <ETHValue>{kycViewerInfo.getCountry}</ETHValue>
-                          </WalletRowValue>
-                        </WalletRow>
-                      </>
-                    )}
-                    <WalletRow key="counter">
-                      <WalletRowName>Counter</WalletRowName>
-                      <WalletRowValue>
-                        <ETHValue>{counter}</ETHValue>
-                      </WalletRowValue>
-                    </WalletRow>
-                  </WalletRows>
-                  <WalletNotice>
-                    <span>Attention!</span> Only send funds to your wallet
-                    address in the Kinto Network
-                  </WalletNotice>
-                  {accountInfo && (
-                    <PrimaryButton onClick={increaseCounter}>
-                      Increase Counter
-                    </PrimaryButton>
-                  )}
-                  <LearnLink
-                    link={"https://docs.kinto.xyz"}
-                    text="Learn more about the Kinto Wallet SDK"
-                  />
-                </CounterWrapper>
-              </BgWrapper>
+            {accountInfo ? (
+              <SwapCard>
+                <BaseHeader title="Realty Swap" />
+                <SwapContainer>
+                  <TokenInput>
+                    <InputHeader>
+                      <span>You {isSelling ? "sell" : "pay"}</span>
+                      <Balance>
+                        Balance:{" "}
+                        {balances[isSelling ? selectedToken : USDC_ADDRESS] ||
+                          "0.0000"}
+                      </Balance>
+                    </InputHeader>
+                    <InputField>
+                      <input
+                        type="number"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        placeholder="0.0"
+                      />
+                      <TokenSelect
+                        value={isSelling ? selectedToken : USDC_ADDRESS}
+                        onChange={(e) => setSelectedToken(e.target.value)}
+                        disabled={!isSelling}
+                      >
+                        {isSelling ? (
+                          <>
+                            <option value={SRC_ADDRESS}>SRC</option>
+                            <option value={LDT_ADDRESS}>LDT</option>
+                          </>
+                        ) : (
+                          <option value={USDC_ADDRESS}>USDC</option>
+                        )}
+                      </TokenSelect>
+                    </InputField>
+                  </TokenInput>
+
+                  <SwapButton onClick={() => setIsSelling(!isSelling)}>
+                    <ArrowDown />
+                  </SwapButton>
+
+                  <TokenInput>
+                    <InputHeader>
+                      <span>You receive</span>
+                      <Balance>
+                        Balance:{" "}
+                        {balances[isSelling ? USDC_ADDRESS : selectedToken] ||
+                          "0.0000"}
+                      </Balance>
+                    </InputHeader>
+                    <InputField>
+                      <input
+                        type="text"
+                        value={expectedOutput}
+                        readOnly
+                        placeholder="0.0"
+                      />
+                      <TokenSelect
+                        value={isSelling ? USDC_ADDRESS : selectedToken}
+                        onChange={(e) => setSelectedToken(e.target.value)}
+                        disabled={isSelling}
+                      >
+                        {!isSelling ? (
+                          <>
+                            <option value={SRC_ADDRESS}>SRC</option>
+                            <option value={LDT_ADDRESS}>LDT</option>
+                          </>
+                        ) : (
+                          <option value={USDC_ADDRESS}>USDC</option>
+                        )}
+                      </TokenSelect>
+                    </InputField>
+                  </TokenInput>
+                </SwapContainer>
+
+                <PrimaryButton
+                  onClick={needsApproval ? approve : handleSwap}
+                  disabled={loading || !amount || parseFloat(amount) <= 0}
+                >
+                  {loading
+                    ? "Processing..."
+                    : !amount
+                    ? "Enter amount"
+                    : needsApproval
+                    ? `Approve ${
+                        isSelling
+                          ? selectedToken === SRC_ADDRESS
+                            ? "SRC"
+                            : "LDT"
+                          : "USDC"
+                      }`
+                    : isSelling
+                    ? "Sell"
+                    : "Buy"}
+                </PrimaryButton>
+              </SwapCard>
+            ) : (
+              <GlobalLoader />
             )}
-            {!accountInfo && <GlobalLoader />}
           </BaseScreen>
           <AppFooter />
         </ContentWrapper>
@@ -359,6 +442,91 @@ const KintoConnect = () => {
     </WholeWrapper>
   );
 };
+
+const SwapCard = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  background: white;
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.1);
+`;
+
+const SwapContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const TokenInput = styled.div`
+  background: #f7f7f7;
+  border-radius: 12px;
+  padding: 16px;
+`;
+
+const InputHeader = styled.div`
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: #666;
+  font-size: 14px;
+`;
+
+const Balance = styled.span`
+  color: #999;
+`;
+
+const InputField = styled.div`
+  display: flex;
+  gap: 12px;
+
+  input {
+    flex: 1;
+    background: none;
+    border: none;
+    font-size: 24px;
+    outline: none;
+    padding: 4px 0;
+
+    &::placeholder {
+      color: #999;
+    }
+  }
+`;
+
+const TokenSelect = styled.select`
+  background: none;
+  border: none;
+  font-size: 18px;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+`;
+
+const SwapButton = styled.button`
+  background: none;
+  border: none;
+  margin: 8px auto;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #666;
+
+  &:hover {
+    color: #333;
+  }
+`;
 
 const WholeWrapper = styled.div`
   flex-flow: column nowrap;
@@ -399,145 +567,42 @@ const ContentWrapper = styled.div`
   overflow: hidden;
 `;
 
-const BgWrapper = styled.div`
-  display: flex;
-  width: 100%;
-  flex-flow: column nowrap;
-  justify-content: center;
-`;
+const ArrowDown = styled.div`
+  width: 24px;
+  height: 24px;
+  position: relative;
 
-const CounterWrapper = styled.div`
-  display: flex;
-  flex-flow: column nowrap;
-  align-items: flex-start;
-  gap: 32px;
-  padding: 16px 0;
-`;
-
-const WalletRows = styled.div`
-  display: flex;
-  padding-top: 16px;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 16px;
-  align-self: stretch;
-  max-width: 800px;
-  border-top: 1px solid var(--light-grey3);
-`;
-
-const WalletRow = styled.div`
-  display: flex;
-  flex-flow: row nowrap;
-  padding-bottom: 16px;
-  align-items: center;
-  gap: 32px;
-  align-self: stretch;
-  border-bottom: 1px solid var(--light-grey3);
-  width: 100%;
-  overflow: hidden;
-`;
-
-const WalletRowName = styled.div`
-  width: 150px;
-  color: var(--night);
-  font-size: 16px;
-  font-weight: 700;
-  text-transform: uppercase;
-
-  @media only screen and (max-width: ${BREAKPOINTS.mobile}) {
-    width: 60px;
-    font-size: 14px;
-  }
-`;
-
-const WalletRowValue = styled.div`
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-  flex: 1 0 0;
-  align-self: stretch;
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 120%;
-
-  @media only screen and (max-width: ${BREAKPOINTS.mobile}) {
-    font-size: 20px;
-  }
-`;
-
-const StyledCreditImage = styled(CreditImage)`
-  height: 28px;
-  width: 28px;
-`;
-
-const KintoLabel = styled.div`
-  color: var(--night);
-  font-size: 24px;
-  font-weight: 400;
-  line-height: 120%; /* 28.8px */
-  @media only screen and (max-width: ${BREAKPOINTS.mobile}) {
-    font-size: 20px;
-  }
-`;
-
-const StyledMainAddress = styled(KintoAddress)`
-  > div {
-    font-size: 24px;
-    font-weight: 700;
-  }
-  gap: 16px;
-  svg {
-    width: 32px;
-    height: 32px;
-  }
-  div {
-    border: none;
-    padding: 0;
-    justify-content: flex-start;
-
-    div div {
-      width: calc(100% - 84px);
-    }
+  &:before,
+  &:after {
+    content: "";
+    position: absolute;
+    background-color: currentColor;
+    border-radius: 2px;
   }
 
-  svg {
-    width: 32px;
-    height: 32px;
+  &:before {
+    width: 2px;
+    height: 16px;
+    left: 11px;
+    top: 0;
   }
-`;
 
-const WalletNotice = styled.div`
-  color: var(--dark-grey);
-  font-size: 18px;
-  font-weight: 400;
-  width: 95%;
-
-  span {
-    color: var(--orange);
-    font-weight: 700;
-  }
-`;
-
-const ETHValue = styled.div`
-  display: flex;
-  flex-flow: row nowrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 24px;
-  font-weight: 400;
-  line-height: 120%;
-  color: var(--night);
-
-  @media only screen and (max-width: ${BREAKPOINTS.mobile}) {
-    font-size: 24px;
+  &:after {
+    width: 12px;
+    height: 12px;
+    left: 6px;
+    top: 11px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg);
+    background: none;
   }
 `;
 
 function App() {
   return (
     <div className="App">
-      <KintoConnect />
+      <TokenMarketplace />
     </div>
   );
 }
